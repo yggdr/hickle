@@ -26,12 +26,28 @@ import os
 import numpy as np
 import h5py as h5
 import re
+try:
+    import cPickle as pkl
+except ImportError:
+    import pickle as pkl
 
 try:
     from exceptions import Exception
     from types import NoneType
 except ImportError:
+    NoneType = type(None)
     pass        # above imports will fail in python3
+
+try:
+    from io import IOBase
+except ImportError:
+    IOBase = file
+
+try:
+    long
+except NameError:
+    long = int
+    unicode = str
 
 import warnings
 __version__ = "2.0.4"
@@ -44,6 +60,7 @@ __author__ = "Danny Price"
 
 class FileError(Exception):
     """ An exception raised if the file is fishy """
+
     def __init__(self):
         return
 
@@ -54,6 +71,7 @@ class FileError(Exception):
 
 class ClosedFileError(Exception):
     """ An exception raised if the file is fishy """
+
     def __init__(self):
         return
 
@@ -65,6 +83,7 @@ class ClosedFileError(Exception):
 class NoMatchError(Exception):
     """ An exception raised if the object type is not understood (or
     supported)"""
+
     def __init__(self):
         return
 
@@ -75,6 +94,7 @@ class NoMatchError(Exception):
 
 class ToDoError(Exception):
     """ An exception raised for non-implemented functionality"""
+
     def __init__(self):
         return
 
@@ -92,6 +112,7 @@ class H5GroupWrapper(h5.Group):
     track_times is a boolean flag that can be set to False, so that two
     files created at different times will have identical MD5 hashes.
     """
+
     def create_dataset(self, *args, **kwargs):
         kwargs['track_times'] = getattr(self, 'track_times', True)
         return super(H5GroupWrapper, self).create_dataset(*args, **kwargs)
@@ -109,6 +130,7 @@ class H5FileWrapper(h5.File):
     track_times is a boolean flag that can be set to False, so that two
     files created at different times will have identical MD5 hashes.
     """
+
     def create_dataset(self, *args, **kwargs):
         kwargs['track_times'] = getattr(self, 'track_times', True)
         return super(H5FileWrapper, self).create_dataset(*args, **kwargs)
@@ -132,7 +154,8 @@ def file_opener(f, mode='r', track_times=True):
 
     """
     # Were we handed a file object or just a file name string?
-    if isinstance(f, file):
+    # if isinstance(f, file):
+    if isinstance(f, IOBase):
         filename, mode = f.name, f.mode
         f.close()
         h5f = h5.File(filename, mode)
@@ -247,7 +270,7 @@ def _dump(py_obj, h_group, call_id=0, **kwargs):
             else:
                 h_subgroup = create_hkl_group(py_obj, h_group, call_id)
                 for ii, py_subobj in enumerate(py_obj):
-                    #print py_subobj, h_subgroup, ii
+                    # print py_subobj, h_subgroup, ii
                     _dump(py_subobj, h_subgroup, call_id=ii, **kwargs)
 
     # item is not iterable, so create a dataset for it
@@ -277,13 +300,13 @@ def dump(py_obj, file_obj, mode='w', track_times=True, path='/', **kwargs):
         h5f = file_opener(file_obj, mode, track_times)
         h5f.attrs["CLASS"] = 'hickle'
         h5f.attrs["VERSION"] = 2
-        h5f.attrs["type"] = ['hickle']
+        h5f.attrs["type"] = [b'hickle']
 
         h_root_group = h5f.get(path)
 
         if h_root_group is None:
             h_root_group = h5f.create_group(path)
-            h_root_group.attrs["type"] = ['hickle']
+            h_root_group.attrs["type"] = [b'hickle']
 
         _dump(py_obj, h_root_group, **kwargs)
         h5f.close()
@@ -354,7 +377,7 @@ def create_hkl_dataset(py_obj, h_group, call_id=0, **kwargs):
         call_id (int): index to identify object's relative location in the iterable.
 
     """
-    #lookup dataset creator type based on python object type
+    # lookup dataset creator type based on python object type
     create_dataset = create_dataset_lookup(py_obj)
 
     # do the creation
@@ -385,7 +408,10 @@ def create_listlike_dataset(py_obj, h_group, call_id=0, **kwargs):
     dtype = str(type(py_obj))
     obj = list(py_obj)
     d = h_group.create_dataset('data_%i' % call_id, data=obj, **kwargs)
-    d.attrs["type"] = [dtype]
+    try:
+        d.attrs["type"] = [bytes(dtype, encoding='utf-8')]
+    except TypeError:
+        d.attrs["type"] = [dtype]
 
 
 def create_np_dtype_dataset(py_obj, h_group, call_id=0, **kwargs):
@@ -397,7 +423,7 @@ def create_np_dtype_dataset(py_obj, h_group, call_id=0, **kwargs):
         call_id (int): index to identify object's relative location in the iterable.
     """
     d = h_group.create_dataset('data_%i' % call_id, data=py_obj, **kwargs)
-    d.attrs["type"] = ['np_dtype']
+    d.attrs["type"] = [b'np_dtype']
     d.attrs["np_dtype"] = str(d.dtype)
 
 
@@ -411,7 +437,7 @@ def create_python_dtype_dataset(py_obj, h_group, call_id=0, **kwargs):
     """
     d = h_group.create_dataset('data_%i' % call_id, data=py_obj,
                                dtype=type(py_obj), **kwargs)
-    d.attrs["type"] = ['python_dtype']
+    d.attrs["type"] = [b'python_dtype']
     d.attrs['python_subdtype'] = str(type(py_obj))
 
 
@@ -424,10 +450,10 @@ def create_dict_dataset(py_obj, h_group, call_id=0, **kwargs):
         call_id (int): index to identify object's relative location in the iterable.
     """
     h_dictgroup = h_group.create_group('data_%i' % call_id)
-    h_dictgroup.attrs["type"] = ['dict']
+    h_dictgroup.attrs["type"] = [b'dict']
     for key, py_subobj in py_obj.items():
         h_subgroup = h_dictgroup.create_group(key)
-        h_subgroup.attrs["type"] = ['dict_item']
+        h_subgroup.attrs["type"] = [b'dict_item']
         _dump(py_subobj, h_subgroup, call_id=0, **kwargs)
 
 
@@ -442,12 +468,13 @@ def create_np_array_dataset(py_obj, h_group, call_id=0, **kwargs):
     if isinstance(py_obj, type(np.ma.array([1]))):
         d = h_group.create_dataset('data_%i' % call_id, data=py_obj, **kwargs)
         #m = h_group.create_dataset('mask_%i' % call_id, data=py_obj.mask, **kwargs)
-        m = h_group.create_dataset('data_%i_mask' % call_id, data=py_obj.mask, **kwargs)
-        d.attrs["type"] = ['ndarray_masked_data']
-        m.attrs["type"] = ['ndarray_masked_mask']
+        m = h_group.create_dataset('data_%i_mask' %
+                                   call_id, data=py_obj.mask, **kwargs)
+        d.attrs["type"] = [b'ndarray_masked_data']
+        m.attrs["type"] = [b'ndarray_masked_mask']
     else:
         d = h_group.create_dataset('data_%i' % call_id, data=py_obj, **kwargs)
-        d.attrs["type"] = ['ndarray']
+        d.attrs["type"] = [b'ndarray']
 
 
 def create_stringlike_dataset(py_obj, h_group, call_id=0, **kwargs):
@@ -460,12 +487,13 @@ def create_stringlike_dataset(py_obj, h_group, call_id=0, **kwargs):
     """
     if isinstance(py_obj, str):
         d = h_group.create_dataset('data_%i' % call_id, data=[py_obj], **kwargs)
-        d.attrs["type"] = ['string']
+        d.attrs["type"] = [b'string']
     else:
         dt = h5.special_dtype(vlen=unicode)
-        dset = h_group.create_dataset('data_%i' % call_id, shape=(1, ), dtype=dt, **kwargs)
+        dset = h_group.create_dataset(
+            'data_%i' % call_id, shape=(1, ), dtype=dt, **kwargs)
         dset[0] = py_obj
-        dset.attrs['type'] = ['unicode']
+        dset.attrs['type'] = [b'unicode']
 
 
 def create_none_dataset(py_obj, h_group, call_id=0, **kwargs):
@@ -477,7 +505,7 @@ def create_none_dataset(py_obj, h_group, call_id=0, **kwargs):
         call_id (int): index to identify object's relative location in the iterable.
     """
     d = h_group.create_dataset('data_%i' % call_id, data=[0], **kwargs)
-    d.attrs["type"] = ['none']
+    d.attrs["type"] = [b'none']
 
 
 def no_match(py_obj, h_group, call_id=0, **kwargs):
@@ -488,11 +516,10 @@ def no_match(py_obj, h_group, call_id=0, **kwargs):
         h_group (h5.File.group): group to dump data into.
         call_id (int): index to identify object's relative location in the iterable.
     """
-    import cPickle
 
-    pickled_obj = cPickle.dumps(py_obj)
+    pickled_obj = pkl.dumps(py_obj)
     d = h_group.create_dataset('data_%i' % call_id, data=[pickled_obj])
-    d.attrs["type"] = ['pickle']
+    d.attrs["type"] = [b'pickle']
 
     warnings.warn("%s type not understood, data have been "
                   "serialized" % type(py_obj))
@@ -510,6 +537,7 @@ class PyContainer(list):
     Python tuples and sets do not allow this. This class provides
     a list-like object that be converted into a list, tuple, set or dict.
     """
+
     def __init__(self):
         super(PyContainer, self).__init__()
         self.container_type = None
@@ -579,10 +607,10 @@ def load_dataset(h_node):
     if h_node.shape == ():
         data = h_node.value
     else:
-        data  = h_node[:]
+        data = h_node[:]
 
     if py_type == "<type 'list'>":
-        #print self.name
+        # print self.name
         return list(data)
     elif py_type == "<type 'tuple'>":
         return tuple(data)
@@ -652,10 +680,11 @@ def _load(py_container, h_group):
                 and load all datasets.
     """
 
-    group_dtype   = h5._hl.group.Group
-    dataset_dtype = h5._hl.dataset.Dataset
+    group_dtype = h5._hl.group.Group
+    # dataset_dtype is only assigned here, it's never used
+    # dataset_dtype = h5._hl.dataset.Dataset
 
-    #either a file, group, or dataset
+    # either a file, group, or dataset
     if isinstance(h_group, H5FileWrapper) or isinstance(h_group, group_dtype):
         py_subcontainer = PyContainer()
         py_subcontainer.container_type = h_group.attrs['type'][0]
@@ -678,5 +707,5 @@ def _load(py_container, h_group):
         subdata = load_dataset(h_group)
         py_container.append(subdata)
 
-    #print h_group.name, py_container
+    # print h_group.name, py_container
     return py_container
